@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub文件分享系统</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f6f8fa;
+        }
+        .container {
+            background-color: white;
+            border-radius: 6px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        }
+        .upload-container {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            border-radius: 6px;
+        }
+        .file-list {
+            list-style: none;
+            padding: 0;
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .button {
+            background: #2ea44f;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .button:hover {
+            background: #2c974b;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .error {
+            color: #cf222e;
+            margin: 10px 0;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>GitHub文件分享系统</h1>
+        
+        <div class="upload-container">
+            <h2>分享新文件</h2>
+            <p>将文件拖放到此处或点击选择文件</p>
+            <input type="file" id="fileInput" style="display: none">
+            <button class="button" onclick="document.getElementById('fileInput').click()">选择文件</button>
+            <div id="error" class="error"></div>
+            <div id="loading" class="loading">
+                <p>正在上传...</p>
+            </div>
+        </div>
+
+        <div>
+            <h2>最近分享的文件</h2>
+            <ul id="fileList" class="file-list"></ul>
+        </div>
+    </div>
+
+    <script>
+        const GITHUB_REPO = 'YOUR_USERNAME/YOUR_REPO'; // 替换为你的GitHub用户名和仓库名
+        const GITHUB_TOKEN = 'YOUR_TOKEN'; // 替换为你的GitHub Personal Access Token
+
+        // 上传文件到GitHub Issues
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+
+            if (!file) {
+                error.textContent = '请选择文件';
+                error.style.display = 'block';
+                return;
+            }
+
+            loading.style.display = 'block';
+            error.style.display = 'none';
+
+            try {
+                // 将文件转换为Base64
+                const base64 = await toBase64(file);
+                
+                // 创建GitHub Issue
+                const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `token ${GITHUB_TOKEN}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        title: `File: ${file.name}`,
+                        body: `\`\`\`json
+{
+    "filename": "${file.name}",
+    "type": "${file.type}",
+    "size": ${file.size},
+    "content": "${base64}"
+}
+\`\`\``,
+                        labels: ['file-share']
+                    })
+                });
+
+                if (!response.ok) throw new Error('上传失败');
+
+                const data = await response.json();
+                alert('文件上传成功！');
+                loadFiles();
+            } catch (err) {
+                error.textContent = '上传失败：' + err.message;
+                error.style.display = 'block';
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+
+        // 加载文件列表
+        async function loadFiles() {
+            try {
+                const response = await fetch(
+                    `https://api.github.com/repos/${GITHUB_REPO}/issues?labels=file-share&state=open`,
+                    {
+                        headers: {
+                            'Authorization': `token ${GITHUB_TOKEN}`
+                        }
+                    }
+                );
+                const issues = await response.json();
+                const fileList = document.getElementById('fileList');
+                fileList.innerHTML = '';
+                
+                issues.forEach(issue => {
+                    const match = issue.body.match(/"filename":\s*"([^"]+)"/);
+                    if (match) {
+                        const filename = match[1];
+                        const li = document.createElement('li');
+                        li.className = 'file-item';
+                        li.innerHTML = `
+                            <span>${filename}</span>
+                            <div>
+                                <button class="button" onclick="downloadFile('${issue.number}')">下载</button>
+                            </div>
+                        `;
+                        fileList.appendChild(li);
+                    }
+                });
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        // 下载文件
+        async function downloadFile(issueNumber) {
+            try {
+                const response = await fetch(
+                    `https://api.github.com/repos/${GITHUB_REPO}/issues/${issueNumber}`,
+                    {
+                        headers: {
+                            'Authorization': `token ${GITHUB_TOKEN}`
+                        }
+                    }
+                );
+                const issue = await response.json();
+                const match = issue.body.match(/```json\n([\s\S]+)\n```/);
+                if (match) {
+                    const data = JSON.parse(match[1]);
+                    const content = data.content;
+                    const filename = data.filename;
+                    
+                    // 创建下载链接
+                    const link = document.createElement('a');
+                    link.href = `data:${data.type};base64,${content}`;
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('下载失败');
+            }
+        }
+
+        // 文件转Base64
+        function toBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = error => reject(error);
+            });
+        }
+
+        // 文件拖放处理
+        const uploadContainer = document.querySelector('.upload-container');
+        
+        uploadContainer.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadContainer.style.borderColor = '#2ea44f';
+        });
+
+        uploadContainer.addEventListener('dragleave', () => {
+            uploadContainer.style.borderColor = '#ccc';
+        });
+
+        uploadContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadContainer.style.borderColor = '#ccc';
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                document.getElementById('fileInput').files = files;
+                uploadFile();
+            }
+        });
+
+        // 文件选择处理
+        document.getElementById('fileInput').addEventListener('change', uploadFile);
+
+        // 页面加载时获取文件列表
+        window.onload = loadFiles;
+    </script>
+</body>
+</html>
